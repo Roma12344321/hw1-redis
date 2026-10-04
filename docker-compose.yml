@@ -1,7 +1,7 @@
 services:
-  master:
+  redis-master:
     image: redis:7
-    container_name: gs-master
+    container_name: redis-master
     command: >
       redis-server 
       --appendonly yes
@@ -13,7 +13,10 @@ services:
     ports:
       - "6379:6379"
     networks:
-      - redis-net
+      redis-net:
+        aliases:
+          - master
+          - redis-master
 
   replica-1:
     image: redis:7
@@ -22,7 +25,7 @@ services:
     ports:
       - "6380:6379"
     depends_on:
-      - master
+      - redis-master
     networks:
       - redis-net
 
@@ -33,7 +36,7 @@ services:
     ports:
       - "6381:6379"
     depends_on:
-      - master
+      - redis-master
     networks:
       - redis-net
 
@@ -46,7 +49,7 @@ services:
     ports:
       - "26379:26379"
     depends_on:
-      - master
+      - redis-master
       - replica-1
       - replica-2
     networks:
@@ -61,7 +64,7 @@ services:
     ports:
       - "26380:26379"
     depends_on:
-      - master
+      - redis-master
       - replica-1
       - replica-2
     networks:
@@ -76,7 +79,7 @@ services:
     ports:
       - "26381:26379"
     depends_on:
-      - master
+      - redis-master
       - replica-1
       - replica-2
     networks:
