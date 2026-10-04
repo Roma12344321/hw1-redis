@@ -16,22 +16,12 @@ import (
 )
 
 const (
-	defaultAddr         = ":8080"
-	shutdownTimout      = 15 * time.Second
-	defaultSentinelAddr = "localhost:26379,localhost:26380,localhost:26381"
+	addr           = ":8080"
+	shutdownTimout = 15 * time.Second
+	sentinelAddrs  = "sentinel-1:26379,sentinel-2:26379,sentinel-3:26379"
 )
 
 func main() {
-	addr := os.Getenv("APP_ADDR")
-	if addr == "" {
-		addr = defaultAddr
-	}
-
-	sentinelAddrs := os.Getenv("SENTINEL_ADDRS")
-	if sentinelAddrs == "" {
-		sentinelAddrs = defaultSentinelAddr
-	}
-
 	redisCli := redis.NewFailoverClient(&redis.FailoverOptions{
 		MasterName:    "mymaster",
 		SentinelAddrs: strings.Split(sentinelAddrs, ","),

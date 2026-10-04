@@ -80,7 +80,7 @@ type Handler struct {
 
 func New(redis *redis.Client) *Handler {
 	h := &Handler{redis: redis}
-	h.initNotificationGroup()
+
 	go h.consumeNotifications()
 
 	return h
@@ -108,17 +108,26 @@ func playerFromMap(id string, m map[string]string) Player {
 	return p
 }
 
-func (h *Handler) initNotificationGroup() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := h.redis.XGroupCreate(ctx, streamKey, streamGroup, "0").Err(); err != nil &&
-		!errors.Is(err, redis.Nil) && !isBusyGroup(err) {
-		log.Printf("notification group init: %v", err)
+func (h *Handler) initNotificationGroup(ctx context.Context) error {
+	err := h.redis.XGroupCreateMkStream(ctx, streamKey, streamGroup, "$").Err()
+	if err != nil && !isBusyGroup(err) {
+		return err
 	}
+	return nil
 }
 
 func (h *Handler) consumeNotifications() {
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := h.initNotificationGroup(ctx)
+		cancel()
+
+		if err == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
 	ctx := context.Background()
 	for {
 		streams, err := h.redis.XReadGroup(ctx, &redis.XReadGroupArgs{
@@ -131,6 +140,11 @@ func (h *Handler) consumeNotifications() {
 
 		if err != nil {
 			if errors.Is(err, redis.Nil) || errors.Is(err, context.Canceled) {
+				continue
+			}
+			if strings.Contains(err.Error(), "NOGROUP") {
+				_ = h.initNotificationGroup(ctx)
+				time.Sleep(time.Second)
 				continue
 			}
 			log.Printf("notifications read: %v", err)
@@ -230,8 +244,12 @@ func (h *Handler) UpdateLevel(c echo.Context) error {
 
 	h.redis.Del(ctx, cacheKey(id))
 
+	minID := fmt.Sprintf("%d-0", time.Now().Add(-streamTTL).UnixMilli())
+
 	_, err = h.redis.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey,
+		MinID:  minID,
+		Approx: true,
 		Values: map[string]interface{}{
 			"player_id": id,
 			"type":      "level_change",

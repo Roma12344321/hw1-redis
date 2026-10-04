@@ -1,0 +1,99 @@
+services:
+  master:
+    image: redis:7
+    container_name: gs-master
+    command: >
+      redis-server 
+      --appendonly yes
+      --save 900 1 300 10 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy volatile-lru
+      --min-replicas-to-write 1
+      --min-replicas-max-lag 10
+    ports:
+      - "6379:6379"
+    networks:
+      - redis-net
+
+  replica-1:
+    image: redis:7
+    container_name: gs-replica-1
+    command: redis-server --replicaof master 6379 --replica-read-only yes --appendonly yes
+    ports:
+      - "6380:6379"
+    depends_on:
+      - master
+    networks:
+      - redis-net
+
+  replica-2:
+    image: redis:7
+    container_name: gs-replica-2
+    command: redis-server --replicaof master 6379 --replica-read-only yes --appendonly yes
+    ports:
+      - "6381:6379"
+    depends_on:
+      - master
+    networks:
+      - redis-net
+
+  sentinel-1:
+    image: redis:7
+    container_name: gs-sentinel-1
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./sentinel1.conf:/etc/redis/sentinel.conf
+    ports:
+      - "26379:26379"
+    depends_on:
+      - master
+      - replica-1
+      - replica-2
+    networks:
+      - redis-net
+
+  sentinel-2:
+    image: redis:7
+    container_name: gs-sentinel-2
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./sentinel2.conf:/etc/redis/sentinel.conf
+    ports:
+      - "26380:26379"
+    depends_on:
+      - master
+      - replica-1
+      - replica-2
+    networks:
+      - redis-net
+
+  sentinel-3:
+    image: redis:7
+    container_name: gs-sentinel-3
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./sentinel3.conf:/etc/redis/sentinel.conf
+    ports:
+      - "26381:26379"
+    depends_on:
+      - master
+      - replica-1
+      - replica-2
+    networks:
+      - redis-net
+
+  app:
+    build: .
+    container_name: gs-app
+    ports:
+      - "8080:8080"
+    depends_on:
+      - sentinel-1
+      - sentinel-2
+      - sentinel-3
+    networks:
+      - redis-net
+
+networks:
+  redis-net:
+    driver: bridge
