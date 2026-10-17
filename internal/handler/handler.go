@@ -75,15 +75,20 @@ type batchRequest struct {
 }
 
 type Handler struct {
-	redis *redis.Client
+	redis    *redis.Client
+	replicas *replicaPool
 }
 
-func New(redis *redis.Client) *Handler {
-	h := &Handler{redis: redis}
+func New(redis *redis.Client, replicaAddrs []string) *Handler {
+	h := &Handler{redis: redis, replicas: newReplicaPool(redis, replicaAddrs)}
 
 	go h.consumeNotifications()
 
 	return h
+}
+
+func (h *Handler) Close() {
+	h.replicas.close()
 }
 
 func playerKey(id string) string      { return playerKeyPrefix + id }
@@ -202,8 +207,9 @@ func (h *Handler) CreateOrUpdatePlayer(c echo.Context) error {
 func (h *Handler) GetPlayer(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
+	read := h.replicas.reader(ctx)
 
-	cached, err := h.redis.Get(ctx, cacheKey(id)).Result()
+	cached, err := read.Get(ctx, cacheKey(id)).Result()
 	if err == nil {
 		return c.JSONBlob(http.StatusOK, []byte(cached))
 	}
@@ -211,7 +217,7 @@ func (h *Handler) GetPlayer(c echo.Context) error {
 		return errJSON(c, http.StatusInternalServerError, err.Error())
 	}
 
-	fields, err := h.redis.HGetAll(ctx, playerKey(id)).Result()
+	fields, err := read.HGetAll(ctx, playerKey(id)).Result()
 	if err != nil {
 		return errJSON(c, http.StatusInternalServerError, err.Error())
 	}
@@ -299,8 +305,9 @@ func (h *Handler) TopPlayers(c echo.Context) error {
 		}
 	}
 
-	entries, err := h.redis.ZRevRangeWithScores(
-		c.Request().Context(), leaderboardKey, 0, int64(limit-1)).Result()
+	ctx := c.Request().Context()
+	entries, err := h.replicas.reader(ctx).ZRevRangeWithScores(
+		ctx, leaderboardKey, 0, int64(limit-1)).Result()
 	if err != nil {
 		return errJSON(c, http.StatusInternalServerError, err.Error())
 	}
@@ -319,7 +326,8 @@ func (h *Handler) TopPlayers(c echo.Context) error {
 func (h *Handler) PlayerRank(c echo.Context) error {
 	playerID := c.Param("playerId")
 
-	rank, err := h.redis.ZRank(c.Request().Context(), leaderboardKey, playerID).Result()
+	ctx := c.Request().Context()
+	rank, err := h.replicas.reader(ctx).ZRank(ctx, leaderboardKey, playerID).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return errJSON(c, http.StatusNotFound, "player not in leaderboard")
@@ -349,7 +357,8 @@ func (h *Handler) HasAchievement(c echo.Context) error {
 	id := c.Param("id")
 	name := c.Param("name")
 
-	member, err := h.redis.SIsMember(c.Request().Context(), achievementKey(id), name).Result()
+	member, err := h.replicas.reader(c.Request().Context()).SIsMember(
+		c.Request().Context(), achievementKey(id), name).Result()
 	if err != nil {
 		return errJSON(c, http.StatusInternalServerError, err.Error())
 	}
@@ -361,8 +370,9 @@ func (h *Handler) CommonAchievements(c echo.Context) error {
 	id1 := c.Param("id1")
 	id2 := c.Param("id2")
 
-	common, err := h.redis.SInter(
-		c.Request().Context(), achievementKey(id1), achievementKey(id2)).Result()
+	ctx := c.Request().Context()
+	common, err := h.replicas.reader(ctx).SInter(
+		ctx, achievementKey(id1), achievementKey(id2)).Result()
 	if err != nil {
 		return errJSON(c, http.StatusInternalServerError, err.Error())
 	}
@@ -391,6 +401,7 @@ func (h *Handler) BatchCreatePlayers(c echo.Context) error {
 			"region":     p.Region,
 			"created_at": now,
 		})
+		pipe.Del(ctx, cacheKey(p.ID))
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		return errJSON(c, http.StatusInternalServerError, err.Error())

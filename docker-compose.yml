@@ -21,7 +21,13 @@ services:
   replica-1:
     image: redis:7
     container_name: gs-replica-1
-    command: redis-server --replicaof master 6379 --replica-read-only yes --appendonly yes
+    command: >
+      redis-server
+      --replicaof master 6379
+      --replica-read-only yes
+      --appendonly yes
+      --min-replicas-to-write 1
+      --min-replicas-max-lag 10
     ports:
       - "6380:6379"
     depends_on:
@@ -32,7 +38,13 @@ services:
   replica-2:
     image: redis:7
     container_name: gs-replica-2
-    command: redis-server --replicaof master 6379 --replica-read-only yes --appendonly yes
+    command: >
+      redis-server
+      --replicaof master 6379
+      --replica-read-only yes
+      --appendonly yes
+      --min-replicas-to-write 1
+      --min-replicas-max-lag 10
     ports:
       - "6381:6379"
     depends_on:

@@ -19,6 +19,7 @@ const (
 	addr           = ":8080"
 	shutdownTimout = 15 * time.Second
 	sentinelAddrs  = "sentinel-1:26379,sentinel-2:26379,sentinel-3:26379"
+	replicaAddrs   = "replica-1:6379,replica-2:6379"
 )
 
 func main() {
@@ -32,7 +33,8 @@ func main() {
 	}
 	defer redisCli.Close()
 
-	hndlr := handler.New(redisCli)
+	hndlr := handler.New(redisCli, strings.Split(replicaAddrs, ","))
+	defer hndlr.Close()
 	srv := server.New(hndlr)
 
 	go func() {
